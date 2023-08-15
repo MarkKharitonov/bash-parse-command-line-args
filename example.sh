@@ -11,6 +11,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         "variable": "APP_NAME"
     },
     {
+        "option": "number=",
+        "required": true,
+        "values": [100, 200, 300, 400],
+        "description": "A number representing one of the AKS root modules",
+        "variable": "NUMBER"
+    },
+    {
+        "option": "k=|kind",
+        "values": ["strict", "relaxed"],
+        "default": "strict",
+        "description": "The validation kind",
+        "variable": "KIND"
+    },
+    {
         "option": "b=|build",
         "required": true,
         "description": "A build definition name",
@@ -35,7 +49,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EOT
 
 echo "APP_NAME=$APP_NAME"
+echo "NUMBER=$NUMBER"
 echo "BUILD_DEF_NAME=$BUILD_DEF_NAME"
+echo "KIND=$KIND"
 echo "NO_NAVIGATE=$NO_NAVIGATE"
 echo "TERRAFORM_PLAN=$TERRAFORM_PLAN"
 echo "SKIP_INTERNAL_DNS=$SKIP_INTERNAL_DNS"

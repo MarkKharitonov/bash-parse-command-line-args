@@ -7,26 +7,44 @@
 
 # THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-IFS=$'\n'
 opts_short=h
 opts_long=help
-help_text="-h, --help[zz]Show this help text"
+help_lines=("-h, --help[zz]Show this help text")
 case_body="    -h | --help)
         help
         exit
         ;;"
-required_check_body=
-required_check_body_delim=
+extra_checks_body=
+extra_checks_body_delim=
 help_opt_len=10
 
 init_vars_text=
 init_vars_delim=
 
-for cmd in $(jq -r '.[] | ([to_entries[] | "\(.key)=\(.value|@sh)"] | join(" "))'); do
-    option= description= required= variable=
+i=0
+readarray cmds < <(jq -r '.[] | ([to_entries[] | {k:.key,v:(.value | if (. | type == "array") then [.[] | tojson | @sh] else (. | @sh) end)} | "\(.k)=\(.v)"] | join(" "))')
+for cmd in "${cmds[@]}"; do
+    ((i = i + 1))
+    option= description= required= values= variable= default=
     eval $cmd
-    if [[ -z "$option" ]] || [[ -z "$description" ]] || [[ -z "variable" ]]; then
-        echo &>2 "Malformed args spec"
+    if [[ -z "variable" ]]; then
+        echo >&2 "$(basename $0): malformed spec for parameter #$i - missing 'variable'."
+        exit 1
+    fi
+    if [[ -z "$option" ]]; then
+        echo >&2 "$(basename $0): malformed spec for $variable - missing 'option'."
+        exit 1
+    fi
+    if [[ -z "$description" ]]; then
+        echo >&2 "$(basename $0): malformed spec for $variable - missing 'description'."
+        exit 1
+    fi
+    if [[ "$required" ]] && [[ "$default" ]] && [[ "$required" != false ]] && [[ "$required" != 0 ]]; then
+        echo >&2 "$(basename $0): malformed spec for $variable - 'required' and 'default' are mutually exclusive."
+        exit 1
+    fi
+    if [[ "$default" ]] && [[ "$values" ]] && [[ -z $(jq -n --arg item "$default" ${values//\'/}'[] | select(. == $item)') ]]; then
+        echo >&2 "$(basename $0): malformed spec for $variable - the default value '$default' is not equal any of the supported values $(echo ${values:1:-1} | tr -d '\"')."
         exit 1
     fi
     IFS='|' read -a keys <<<$option
@@ -45,7 +63,7 @@ for cmd in $(jq -r '.[] | ([to_entries[] | "\(.key)=\(.value|@sh)"] | join(" "))
         ((i = i + 1))
     done
 
-    init_vars_text+="$init_vars_delim$variable="
+    init_vars_text+="$init_vars_delim$variable=$default"
     init_vars_delim="
 "
 
@@ -86,17 +104,29 @@ for cmd in $(jq -r '.[] | ([to_entries[] | "\(.key)=\(.value|@sh)"] | join(" "))
         ;;"
 
     if [[ $required == true ]]; then
-        required_check_body+="${required_check_body_delim}if [[ -z \"\$$variable\" ]]; then
-    echo \"$(basename $0): a required option is missing ($case_cond)\"
+        extra_checks_body+="${extra_checks_body_delim}if [[ -z \"\$$variable\" ]]; then
+    echo \"\$(basename \$0): ($case_cond) value must be given\"
     exit 1
 fi"
-        required_check_body_delim="
+        extra_checks_body_delim="
 "
         description="[REQUIRED] $description"
     fi
 
-    help_text+="
-$help_opt[zz]$description"
+    help_lines+=("$help_opt[zz]$description")
+
+    if [[ "$values" ]]; then
+        extra_checks_body+="${extra_checks_body_delim}if [[ \"\$$variable\" ]] && [[ -z \$(jq -n --arg item \"\$$variable\" $values'[] | tostring | select(. == \$item)') ]]; then
+    echo \"\$(basename \$0): The given ($case_cond) value of '\$$variable' is not equal any of the supported values ${values:1:-1}\"
+    exit 1
+fi"
+        extra_checks_body_delim="
+"
+        help_lines+=(" [zz]The supported values: ${values:1:-1}")
+    fi
+    if [[ "$default" ]]; then
+        help_lines+=(" [zz]The default value: '$default'")
+    fi
 done
 
 temp_file=$(mktemp)
@@ -104,8 +134,8 @@ temp_file=$(mktemp)
     echo 'help() {'
     echo '    echo Command line options:'
     echo '    echo'
-    for help_line in $(echo "$help_text"); do
-        echo $help_line | awk -F '\\[zz\\]' -v width=$help_opt_len '{ printf("    echo \"%-*s%s\"\n", width + 1, $1, $2) }'
+    for help_line in "${help_lines[@]}"; do
+        echo "$help_line" | awk -F '\\[zz\\]' -v width=$help_opt_len '{ printf("    echo \"%-*s%s\"\n", width + 1, $1, $2) }'
     done
     echo '}'
     echo
@@ -130,7 +160,7 @@ temp_file=$(mktemp)
     echo '        ;;'
     echo '    esac'
     echo 'done'
-    echo "$required_check_body"
+    echo "$extra_checks_body"
 } >$temp_file
 
 . $temp_file
